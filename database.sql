@@ -3,8 +3,7 @@ CREATE TABLE Modulos (
     id_modulo VARCHAR(20) PRIMARY KEY,
     tipo ENUM('Recetor', 'Temperaturas', 'ESP8266') NOT NULL,
     localizacao VARCHAR(100),
-    data_instalacao DATETIME DEFAULT CURRENT_TIMESTAMP,
-    observacoes TEXT
+    data_instalacao DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabela de Sensores (catálogo de todos os sensores)
@@ -13,11 +12,8 @@ CREATE TABLE Sensores (
     id_modulo VARCHAR(20) NOT NULL,
     tipo_sensor VARCHAR(50) NOT NULL,
     endereco VARCHAR(50),
-    variavel_medida VARCHAR(100) NOT NULL,
-    unidade VARCHAR(20),
     pino VARCHAR(50),
     protocolo VARCHAR(50),
-    observacoes TEXT,
     FOREIGN KEY (id_modulo) REFERENCES Modulos(id_modulo)
         ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -35,22 +31,6 @@ CREATE TABLE Leituras (
     INDEX idx_modulo_timestamp (id_modulo, timestamp_epoch),
     INDEX idx_timestamp_epoch (timestamp_epoch),
     FOREIGN KEY (id_modulo) REFERENCES Modulos(id_modulo)
-        ON DELETE CASCADE ON UPDATE CASCADE
-);
-
--- Tabela de Leituras Detalhadas (uma linha por sensor)
-CREATE TABLE Leituras_Detalhadas (
-    id_leitura_det BIGINT AUTO_INCREMENT PRIMARY KEY,
-    id_sensor VARCHAR(20) NOT NULL,
-    timestamp_epoch BIGINT NOT NULL,
-    valor DECIMAL(12,6),
-    valor_bruto INT,
-    unidade VARCHAR(20),
-    caminho_ficheiro_sd VARCHAR(255),
-    timestamp_gravacao DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_sensor_timestamp (id_sensor, timestamp_epoch),
-    INDEX idx_timestamp_epoch (timestamp_epoch),
-    FOREIGN KEY (id_sensor) REFERENCES Sensores(id_sensor)
         ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -117,28 +97,9 @@ CREATE TABLE Comunicacoes (
     FOREIGN KEY (id_modulo_destino) REFERENCES Modulos(id_modulo)
 );
 
-
--- =========================================================
--- STORED PROCEDURES
--- =========================================================
-
+/*
 DELIMITER //
 
--- Procedure: Registrar evento automático de bateria baixa
-CREATE PROCEDURE sp_verificar_bateria(
-    IN p_id_modulo VARCHAR(20),
-    IN p_voltagem DECIMAL(5,3)
-)
-BEGIN
-    IF p_voltagem < 3.5 THEN
-        INSERT INTO Eventos (timestamp_evento, id_modulo, tipo_evento, descricao, valor_associado)
-        VALUES (NOW(), p_id_modulo, 'Bateria_Baixa', 
-                CONCAT('Voltagem crítica: ', p_voltagem, 'V'), 
-                p_voltagem);
-    END IF;
-END //
-
--- Procedure: Inserir leitura completa
 CREATE PROCEDURE sp_inserir_leitura(
     IN p_id_modulo VARCHAR(20),
     IN p_timestamp_epoch BIGINT,
@@ -148,16 +109,9 @@ CREATE PROCEDURE sp_inserir_leitura(
     IN p_caminho_ficheiro VARCHAR(255)
 )
 BEGIN
-    -- Inserir na tabela principal
+    -- Inserir apenas na tabela principal Leituras
     INSERT INTO Leituras (id_modulo, timestamp_epoch, voltagem, sensor1_temp, sensor2_temp, caminho_ficheiro_sd)
     VALUES (p_id_modulo, p_timestamp_epoch, p_voltagem, p_sensor1_temp, p_sensor2_temp, p_caminho_ficheiro);
-    
-    -- Inserir nas leituras detalhadas
-    INSERT INTO Leituras_Detalhadas (id_sensor, timestamp_epoch, valor, unidade, caminho_ficheiro_sd)
-    VALUES 
-        ('SENS_VBAT_01', p_timestamp_epoch, p_voltagem, 'V', p_caminho_ficheiro),
-        ('SENS_DS18B20_1', p_timestamp_epoch, p_sensor1_temp, '°C', p_caminho_ficheiro),
-        ('SENS_DS18B20_2', p_timestamp_epoch, p_sensor2_temp, '°C', p_caminho_ficheiro);
     
     -- Verificar bateria
     CALL sp_verificar_bateria(p_id_modulo, p_voltagem);
@@ -182,3 +136,4 @@ BEGIN
 END //
 
 DELIMITER ;
+*/
