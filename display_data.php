@@ -9,9 +9,7 @@ if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-/* ------------------------
-   RECEBER PARÂMETROS GET
-   ------------------------ */
+/* ==== RECEBER PARÂMETROS ==== */
 $startDate     = $_GET['startDate']     ?? null;
 $endDate       = $_GET['endDate']       ?? null;
 $intervalStart = $_GET['intervalStart'] ?? null;
@@ -19,9 +17,7 @@ $intervalEnd   = $_GET['intervalEnd']   ?? null;
 $dataFrequency = $_GET['dataFrequency'] ?? null;
 $sensor        = $_GET['sensor']        ?? null;
 
-/* ----------------------------------------
-   BASE QUERY (agora usando a tabela correta)
-   ---------------------------------------- */
+/* ==== QUERY CORRETA PARA A TABELA LEITURAS ==== */
 $sql = "
     SELECT 
         id_leitura AS id,
@@ -33,16 +29,13 @@ $sql = "
     WHERE 1=1
 ";
 
-/* ----------------------------------------
-   FILTRO POR SENSOR (opcional)
-   ---------------------------------------- */
-if ($sensor) {
-    $sql .= " AND id_sensor = '" . $conn->real_escape_string($sensor) . "' ";
+/* ==== FILTRO POR SENSOR ==== */
+if (!empty($sensor)) {
+    $sensorEscaped = $conn->real_escape_string($sensor);
+    $sql .= " AND id_sensor = '$sensorEscaped' ";
 }
 
-/* ----------------------------------------
-   FILTRO POR INTERVALO DE DATAS
-   ---------------------------------------- */
+/* ==== FILTRO POR DATAS ==== */
 if ($startDate && $endDate) {
     $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) BETWEEN '$startDate' AND '$endDate' ";
 } elseif ($startDate) {
@@ -51,27 +44,18 @@ if ($startDate && $endDate) {
     $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) <= '$endDate' ";
 }
 
-/* ----------------------------------------
-   FILTRO POR INTERVALO DE HORAS
-   ---------------------------------------- */
-if ($intervalStart && $intervalEnd && $startDate && $endDate) {
-    $intervalStartFull = "$startDate $intervalStart:00";
-    $intervalEndFull   = "$endDate $intervalEnd:59";
-
+/* ==== FILTRO POR HORAS ==== */
+if ($intervalStart && $intervalEnd) {
     $sql .= "
-        AND TIME(FROM_UNIXTIME(timestamp_epoch)) BETWEEN 
-        TIME('$intervalStartFull') AND TIME('$intervalEndFull')
+        AND TIME(FROM_UNIXTIME(timestamp_epoch)) 
+        BETWEEN '$intervalStart:00' AND '$intervalEnd:59'
     ";
 }
 
-/* ----------------------------------------
-   ORDENAR POR TEMPO
-   ---------------------------------------- */
+/* ==== ORDENAR ==== */
 $sql .= " ORDER BY timestamp_epoch ASC";
 
-/* ----------------------------------------
-   EXECUTAR QUERY
-   ---------------------------------------- */
+/* ==== EXECUTAR ==== */
 $result = $conn->query($sql);
 if (!$result) {
     die("Query failed: " . $conn->error);
@@ -82,14 +66,9 @@ while ($row = $result->fetch_assoc()) {
     $sensor_data[] = $row;
 }
 
-/* ----------------------------------------
-   FILTRAGEM PELA FREQUÊNCIA TEMPORAL
-   ---------------------------------------- */
+/* ==== FILTRAGEM TEMPORAL ==== */
 if ($dataFrequency) {
-    $filtered_data = [];
-    $interval = 0;
-
-    $intervalMap = [
+    $freq = [
         "1s"  => 1,
         "30s" => 30,
         "1m"  => 60,
@@ -97,99 +76,65 @@ if ($dataFrequency) {
         "5m"  => 300,
         "10m" => 600,
         "30m" => 1800,
-        "1h"  => 3600
+        "1h"  => 3600,
     ];
 
-    if (isset($intervalMap[$dataFrequency])) {
-        $interval = $intervalMap[$dataFrequency];
-    }
-
-    $last_timestamp = null;
+    $interval = $freq[$dataFrequency] ?? 0;
+    $filtered_data = [];
+    $last_ts = null;
 
     foreach ($sensor_data as $row) {
-        $current_ts = strtotime($row["timestamp"]);
-
-        if ($last_timestamp === null || ($current_ts - $last_timestamp) >= $interval) {
+        $ts = strtotime($row["timestamp"]);
+        if ($last_ts === null || $ts - $last_ts >= $interval) {
             $filtered_data[] = $row;
-            $last_timestamp = $current_ts;
+            $last_ts = $ts;
         }
     }
-
     $sensor_data = $filtered_data;
 }
 
-/* ----------------------------------------
-   PREPARAR ARRAYS PARA GRÁFICOS
-   ---------------------------------------- */
-$timestamps   = array_column($sensor_data, "timestamp");
+/* ==== PREPARAR ARRAYS PARA GRÁFICOS ==== */
+$timestamps   = array_reverse(array_column($sensor_data, "timestamp"));
 $temperature  = json_encode(array_reverse(array_column($sensor_data, "temperature")), JSON_NUMERIC_CHECK);
 $sensor_value = json_encode(array_reverse(array_column($sensor_data, "sensor_value")), JSON_NUMERIC_CHECK);
-$timestamp    = json_encode(array_reverse($timestamps), JSON_NUMERIC_CHECK);
+$timestamp    = json_encode($timestamps, JSON_NUMERIC_CHECK);
 
-$result->free();
-$conn->close();
 ?>
-
 <!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="https://code.highcharts.com/highcharts.js"></script>
-<style>
-body {
-    min-width: 310px;
-    max-width: 1280px;
-    margin: 0 auto;
-    background-color: #f4f4f4;
-    font-family: Arial, sans-serif;
-    color: #333;
-}
-.container {
-    background: white;
-    margin-bottom: 20px;
-    padding: 20px;
-    border-radius: 8px;
-}
-.filters {
-    text-align: center;
-    margin-bottom: 20px;
-}
-.filters input, .filters select {
-    padding: 5px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-}
-</style>
 </head>
 
 <body>
 <h2 style="text-align:center;">LEITURAS DOS SENSORES</h2>
 
-<div class="filters">
+<div class="filters" style="text-align:center;margin-bottom:20px;">
     <label>Sensor:</label>
-    <input type="text" id="sensor" value="<?php echo $sensor ?? ''; ?>">
+    <input type="text" id="sensor" value="<?php echo $sensor; ?>">
 
     <label>Start Date:</label>
-    <input type="date" id="startDate" value="<?php echo $startDate ?? ''; ?>">
+    <input type="date" id="startDate" value="<?php echo $startDate; ?>">
 
     <label>End Date:</label>
-    <input type="date" id="endDate" value="<?php echo $endDate ?? ''; ?>">
+    <input type="date" id="endDate" value="<?php echo $endDate; ?>">
 
-    <label>Interval Start:</label>
-    <input type="time" id="intervalStart" value="<?php echo $intervalStart ?? ''; ?>">
+    <label>Time Start:</label>
+    <input type="time" id="intervalStart" value="<?php echo $intervalStart; ?>">
 
-    <label>Interval End:</label>
-    <input type="time" id="intervalEnd" value="<?php echo $intervalEnd ?? ''; ?>">
+    <label>Time End:</label>
+    <input type="time" id="intervalEnd" value="<?php echo $intervalEnd; ?>">
 
-    <label>Data Frequency:</label>
+    <label>Frequency:</label>
     <select id="dataFrequency">
         <option value="">None</option>
         <?php 
-        $opts = ['1s','30s','1m','2m','5m','10m','30m','1h'];
-        foreach ($opts as $o) {
-            $sel = ($dataFrequency === $o) ? "selected" : "";
-            echo "<option value='$o' $sel>$o</option>";
-        }
+            $opts = ["1s","30s","1m","2m","5m","10m","30m","1h"];
+            foreach ($opts as $o) {
+                $sel = ($dataFrequency === $o) ? "selected" : "";
+                echo "<option value='$o' $sel>$o</option>";
+            }
         ?>
     </select>
 
@@ -198,39 +143,32 @@ body {
 
 <script>
 function applyFilters() {
-    const s = new URLSearchParams({
+    const params = new URLSearchParams({
         sensor: document.getElementById('sensor').value,
         startDate: document.getElementById('startDate').value,
         endDate: document.getElementById('endDate').value,
         intervalStart: document.getElementById('intervalStart').value,
         intervalEnd: document.getElementById('intervalEnd').value,
         dataFrequency: document.getElementById('dataFrequency').value
-    }).toString();
-
-    window.location.href = "?" + s;
+    });
+    window.location.href = "?" + params.toString();
 }
 </script>
 
-<div id="chart-temperature" class="container"></div>
-<div id="chart-sensor" class="container"></div>
+<div id="chart-temperature"></div>
+<div id="chart-sensor"></div>
 
 <script>
-var temperature = <?php echo $temperature; ?>;
-var sensor_value = <?php echo $sensor_value; ?>;
-var timestamp = <?php echo $timestamp; ?>;
-
 Highcharts.chart('chart-temperature', {
-    title: { text: 'Sensor Temperature' },
-    xAxis: { categories: timestamp },
-    yAxis: { title: { text: '°C' } },
-    series: [{ data: temperature }]
+    title: { text: 'Temperature' },
+    xAxis: { categories: <?php echo $timestamp; ?> },
+    series: [{ data: <?php echo $temperature; ?> }]
 });
 
 Highcharts.chart('chart-sensor', {
     title: { text: 'Sensor Value (Voltagem)' },
-    xAxis: { categories: timestamp },
-    yAxis: { title: { text: 'Voltagem (V)' } },
-    series: [{ data: sensor_value }]
+    xAxis: { categories: <?php echo $timestamp; ?> },
+    series: [{ data: <?php echo $sensor_value; ?> }]
 });
 </script>
 
