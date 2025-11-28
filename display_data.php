@@ -26,8 +26,9 @@ $sql = "
     SELECT 
         id_leitura AS id,
         id_sensor,
-        sensor1_temp AS temperature,
-        voltagem AS sensor_value,
+        sensor1_temp,
+        sensor2_temp,
+        voltagem,
         FROM_UNIXTIME(timestamp_epoch) AS timestamp
     FROM Leituras
     WHERE 1=1
@@ -45,20 +46,26 @@ if (!empty($sensor)) {
    FILTRO POR DATA
    ============================ */
 if ($startDate && $endDate) {
-    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) BETWEEN '$startDate' AND '$endDate' ";
+    $startDate_esc = $conn->real_escape_string($startDate);
+    $endDate_esc = $conn->real_escape_string($endDate);
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) BETWEEN '$startDate_esc' AND '$endDate_esc' ";
 } elseif ($startDate) {
-    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) >= '$startDate' ";
+    $startDate_esc = $conn->real_escape_string($startDate);
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) >= '$startDate_esc' ";
 } elseif ($endDate) {
-    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) <= '$endDate' ";
+    $endDate_esc = $conn->real_escape_string($endDate);
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) <= '$endDate_esc' ";
 }
 
 /* ============================
    FILTRO POR HORAS
    ============================ */
 if ($intervalStart && $intervalEnd) {
+    $intervalStart_esc = $conn->real_escape_string($intervalStart);
+    $intervalEnd_esc = $conn->real_escape_string($intervalEnd);
     $sql .= "
         AND TIME(FROM_UNIXTIME(timestamp_epoch))
-        BETWEEN '$intervalStart:00' AND '$intervalEnd:59'
+        BETWEEN '$intervalStart_esc:00' AND '$intervalEnd_esc:59'
     ";
 }
 
@@ -117,36 +124,47 @@ if ($dataFrequency) {
    PREPARAR ARRAYS PARA GRÁFICOS
    ============================ */
 $timestamps   = array_reverse(array_column($sensor_data, "timestamp"));
-$temperature  = json_encode(array_reverse(array_column($sensor_data, "temperature")), JSON_NUMERIC_CHECK);
-$sensor_value = json_encode(array_reverse(array_column($sensor_data, "sensor_value")), JSON_NUMERIC_CHECK);
+$sensor1_temp = json_encode(array_reverse(array_column($sensor_data, "sensor1_temp")), JSON_NUMERIC_CHECK);
+$sensor2_temp = json_encode(array_reverse(array_column($sensor_data, "sensor2_temp")), JSON_NUMERIC_CHECK);
+$voltagem     = json_encode(array_reverse(array_column($sensor_data, "voltagem")), JSON_NUMERIC_CHECK);
 $timestamp    = json_encode($timestamps, JSON_NUMERIC_CHECK);
 
 ?>
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="UTF-8">
 <script src="https://code.highcharts.com/highcharts.js"></script>
+<style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .filter-container { text-align: center; margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 5px; }
+    .filter-container label { margin-right: 5px; font-weight: bold; }
+    .filter-container input, .filter-container select { margin-right: 15px; padding: 5px; }
+    .filter-container button { padding: 6px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    .filter-container button:hover { background: #0056b3; }
+    .chart-container { margin: 20px 0; }
+</style>
 </head>
 
 <body>
 <h2 style="text-align:center;">LEITURAS DOS SENSORES</h2>
 
-<div style="text-align:center;margin-bottom:20px;">
+<div class="filter-container">
 
     <label>Sensor:</label>
-    <input type="text" id="sensor" value="<?php echo $sensor; ?>">
+    <input type="text" id="sensor" value="<?php echo htmlspecialchars($sensor ?? ''); ?>">
 
     <label>Start:</label>
-    <input type="date" id="startDate" value="<?php echo $startDate; ?>">
+    <input type="date" id="startDate" value="<?php echo htmlspecialchars($startDate ?? ''); ?>">
 
     <label>End:</label>
-    <input type="date" id="endDate" value="<?php echo $endDate; ?>">
+    <input type="date" id="endDate" value="<?php echo htmlspecialchars($endDate ?? ''); ?>">
 
     <label>Hour Start:</label>
-    <input type="time" id="intervalStart" value="<?php echo $intervalStart; ?>">
+    <input type="time" id="intervalStart" value="<?php echo htmlspecialchars($intervalStart ?? ''); ?>">
 
     <label>Hour End:</label>
-    <input type="time" id="intervalEnd" value="<?php echo $intervalEnd; ?>">
+    <input type="time" id="intervalEnd" value="<?php echo htmlspecialchars($intervalEnd ?? ''); ?>">
 
     <label>Freq:</label>
     <select id="dataFrequency">
@@ -176,22 +194,57 @@ function applyFilters() {
 }
 </script>
 
-<div id="chart-temperature"></div>
-<div id="chart-sensor"></div>
+<div id="chart-temp1" class="chart-container"></div>
+<div id="chart-temp2" class="chart-container"></div>
+<div id="chart-voltagem" class="chart-container"></div>
 
 <script>
-Highcharts.chart('chart-temperature', {
-    title: { text: 'Temperature (sensor1_temp)' },
-    xAxis: { categories: <?php echo $timestamp; ?> },
-    series: [{ data: <?php echo $temperature; ?> }]
+Highcharts.chart('chart-temp1', {
+    title: { text: 'Temperatura Sensor 1' },
+    xAxis: { 
+        categories: <?php echo $timestamp; ?>,
+        title: { text: 'Timestamp' }
+    },
+    yAxis: {
+        title: { text: 'Temperatura (°C)' }
+    },
+    series: [{ 
+        name: 'Sensor 1',
+        data: <?php echo $sensor1_temp; ?> 
+    }]
 });
 
-Highcharts.chart('chart-sensor', {
+Highcharts.chart('chart-temp2', {
+    title: { text: 'Temperatura Sensor 2' },
+    xAxis: { 
+        categories: <?php echo $timestamp; ?>,
+        title: { text: 'Timestamp' }
+    },
+    yAxis: {
+        title: { text: 'Temperatura (°C)' }
+    },
+    series: [{ 
+        name: 'Sensor 2',
+        data: <?php echo $sensor2_temp; ?> 
+    }]
+});
+
+Highcharts.chart('chart-voltagem', {
     title: { text: 'Voltagem' },
-    xAxis: { categories: <?php echo $timestamp; ?> },
-    series: [{ data: <?php echo $sensor_value; ?> }]
+    xAxis: { 
+        categories: <?php echo $timestamp; ?>,
+        title: { text: 'Timestamp' }
+    },
+    yAxis: {
+        title: { text: 'Voltagem (V)' }
+    },
+    series: [{ 
+        name: 'Voltagem',
+        data: <?php echo $voltagem; ?> 
+    }]
 });
 </script>
 
 </body>
 </html>
+<?php $conn->close(); ?>
