@@ -1,24 +1,27 @@
 <?php
 $servername = "localhost";
-$username = "root"; // default XAMPP username
-$password = "";     // default XAMPP password
-$dbname = "sensor_data"; //  database name
+$username = "root";       // ou o user MySQL do servidor
+$password = "";           // password MySQL
+$dbname = "sensor_project";
 
 $conn = new mysqli($servername, $username, $password, $dbname);
+if ($conn->connect_error) { die("Connection failed: " . $conn->connect_error); }
 
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+// Dados enviados via URL (GET)
+$id_sensor        = $_GET['id_sensor'];
+$timestamp_epoch  = $_GET['timestamp'];
+$voltagem         = $_GET['voltagem'];
+$temp1            = $_GET['temp1'];
+$temp2            = $_GET['temp2'];
 
-$sensor1 = $_POST['sensor1']; // temperature
-$sensor2 = $_POST['sensor2']; // sensor value
-
-$sql = "INSERT INTO sensor_data (temperature, sensor_value) VALUES ('$sensor1', '$sensor2')";
+// Inserção
+$sql = "INSERT INTO Leituras (id_sensor, timestamp_epoch, voltagem, sensor1_temp, sensor2_temp)
+        VALUES ('$id_sensor', '$timestamp_epoch', '$voltagem', '$temp1', '$temp2')";
 
 if ($conn->query($sql) === TRUE) {
-    echo "Data inserted successfully"; 
+    echo "OK";
 } else {
-    echo "Error: " . $sql . "<br>" . $conn->error;
+    echo "Erro: " . $conn->error;
 }
 
 $conn->close();
