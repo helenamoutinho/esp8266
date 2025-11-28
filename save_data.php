@@ -2,7 +2,7 @@
 $servername = "localhost";
 $username = "root";       // ou o user MySQL do servidor
 $password = "";           // password MySQL
-$dbname = "sensor_project";
+$dbname = "sensor_projects";
 
 $conn = new mysqli($servername, $username, $password, $dbname);
 if ($conn->connect_error) { die("Connection failed: " . $conn->connect_error); }
