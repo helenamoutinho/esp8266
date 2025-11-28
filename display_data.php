@@ -5,95 +5,126 @@ $username = "root";
 $password = "";
 
 $conn = new mysqli($servername, $username, $password, $dbname);
-
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
 
-$startDate = $_GET['startDate'] ?? null; 
-$endDate = $_GET['endDate'] ?? null; 
-$intervalStart = $_GET['intervalStart'] ?? null; 
-$intervalEnd = $_GET['intervalEnd'] ?? null; 
-$dataFrequency = $_GET['dataFrequency'] ?? null; 
+/* ------------------------
+   RECEBER PARÂMETROS GET
+   ------------------------ */
+$startDate     = $_GET['startDate']     ?? null;
+$endDate       = $_GET['endDate']       ?? null;
+$intervalStart = $_GET['intervalStart'] ?? null;
+$intervalEnd   = $_GET['intervalEnd']   ?? null;
+$dataFrequency = $_GET['dataFrequency'] ?? null;
+$sensor        = $_GET['sensor']        ?? null;
 
-$sql = "SELECT id, temperature, sensor_value, timestamp FROM sensor_data WHERE 1=1";
+/* ----------------------------------------
+   BASE QUERY (agora usando a tabela correta)
+   ---------------------------------------- */
+$sql = "
+    SELECT 
+        id_leitura AS id,
+        sensor1_temp AS temperature,
+        voltagem AS sensor_value,
+        FROM_UNIXTIME(timestamp_epoch) AS timestamp,
+        id_sensor
+    FROM Leituras
+    WHERE 1=1
+";
 
+/* ----------------------------------------
+   FILTRO POR SENSOR (opcional)
+   ---------------------------------------- */
+if ($sensor) {
+    $sql .= " AND id_sensor = '" . $conn->real_escape_string($sensor) . "' ";
+}
+
+/* ----------------------------------------
+   FILTRO POR INTERVALO DE DATAS
+   ---------------------------------------- */
 if ($startDate && $endDate) {
-    $sql .= " AND DATE(timestamp) BETWEEN '$startDate' AND '$endDate'";
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) BETWEEN '$startDate' AND '$endDate' ";
 } elseif ($startDate) {
-    $sql .= " AND DATE(timestamp) >= '$startDate'";
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) >= '$startDate' ";
 } elseif ($endDate) {
-    $sql .= " AND DATE(timestamp) <= '$endDate'";
+    $sql .= " AND DATE(FROM_UNIXTIME(timestamp_epoch)) <= '$endDate' ";
 }
 
+/* ----------------------------------------
+   FILTRO POR INTERVALO DE HORAS
+   ---------------------------------------- */
+if ($intervalStart && $intervalEnd && $startDate && $endDate) {
+    $intervalStartFull = "$startDate $intervalStart:00";
+    $intervalEndFull   = "$endDate $intervalEnd:59";
 
-if ($intervalStart && $intervalEnd) {
-    $intervalStart = "$startDate $intervalStart:00";
-    $intervalEnd = "$endDate $intervalEnd:59"; 
-    $sql .= " AND TIME(timestamp) BETWEEN '$intervalStart' AND '$intervalEnd'";
+    $sql .= "
+        AND TIME(FROM_UNIXTIME(timestamp_epoch)) BETWEEN 
+        TIME('$intervalStartFull') AND TIME('$intervalEndFull')
+    ";
 }
 
-$sql .= " ORDER BY timestamp ASC"; 
+/* ----------------------------------------
+   ORDENAR POR TEMPO
+   ---------------------------------------- */
+$sql .= " ORDER BY timestamp_epoch ASC";
 
+/* ----------------------------------------
+   EXECUTAR QUERY
+   ---------------------------------------- */
 $result = $conn->query($sql);
-
 if (!$result) {
     die("Query failed: " . $conn->error);
 }
 
 $sensor_data = [];
-while ($data = $result->fetch_assoc()) {
-    $sensor_data[] = $data;
+while ($row = $result->fetch_assoc()) {
+    $sensor_data[] = $row;
 }
 
+/* ----------------------------------------
+   FILTRAGEM PELA FREQUÊNCIA TEMPORAL
+   ---------------------------------------- */
 if ($dataFrequency) {
     $filtered_data = [];
     $interval = 0;
 
-    switch ($dataFrequency) {
-        case '1s':
-            $interval = 1;
-            break;
-        case '30s':
-            $interval = 30;
-            break;
-        case '1m':
-            $interval = 60;
-            break;
-        case '2m':
-            $interval = 120;
-            break;
-        case '5m':
-            $interval = 300;
-            break;
-        case '10m':
-            $interval = 600;
-            break;
-        case '30m':
-            $interval = 1800;
-            break;
-        case '1h':
-            $interval = 3600;
-            break;
+    $intervalMap = [
+        "1s"  => 1,
+        "30s" => 30,
+        "1m"  => 60,
+        "2m"  => 120,
+        "5m"  => 300,
+        "10m" => 600,
+        "30m" => 1800,
+        "1h"  => 3600
+    ];
+
+    if (isset($intervalMap[$dataFrequency])) {
+        $interval = $intervalMap[$dataFrequency];
     }
 
     $last_timestamp = null;
-    foreach ($sensor_data as $data) {
-        $current_timestamp = strtotime($data['timestamp']);
-        if ($last_timestamp === null || ($current_timestamp - $last_timestamp) >= $interval) {
-            $filtered_data[] = $data;
-            $last_timestamp = $current_timestamp;
+
+    foreach ($sensor_data as $row) {
+        $current_ts = strtotime($row["timestamp"]);
+
+        if ($last_timestamp === null || ($current_ts - $last_timestamp) >= $interval) {
+            $filtered_data[] = $row;
+            $last_timestamp = $current_ts;
         }
     }
 
     $sensor_data = $filtered_data;
 }
 
-$readings_time = array_column($sensor_data, 'timestamp');
-
-$temperature = json_encode(array_reverse(array_column($sensor_data, 'temperature')), JSON_NUMERIC_CHECK);
-$sensor_value = json_encode(array_reverse(array_column($sensor_data, 'sensor_value')), JSON_NUMERIC_CHECK);
-$timestamp = json_encode(array_reverse($readings_time), JSON_NUMERIC_CHECK);
+/* ----------------------------------------
+   PREPARAR ARRAYS PARA GRÁFICOS
+   ---------------------------------------- */
+$timestamps   = array_column($sensor_data, "timestamp");
+$temperature  = json_encode(array_reverse(array_column($sensor_data, "temperature")), JSON_NUMERIC_CHECK);
+$sensor_value = json_encode(array_reverse(array_column($sensor_data, "sensor_value")), JSON_NUMERIC_CHECK);
+$timestamp    = json_encode(array_reverse($timestamps), JSON_NUMERIC_CHECK);
 
 $result->free();
 $conn->close();
@@ -101,140 +132,107 @@ $conn->close();
 
 <!DOCTYPE html>
 <html>
+<head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://code.highcharts.com/highcharts.js"></script>
-  <style>
-    body {
-      min-width: 310px;
-      max-width: 1280px;
-      height: 500px;
-      margin: 0 auto;
-      font-family: 'Arial', sans-serif;
-      background-color: #f4f4f4;
-      color: #333;
-    }
-    h2 {
-      font-size: 2.5rem;
-      text-align: center;
-      color: #555;
-    }
-    .filters {
-      margin-bottom: 20px;
-      text-align: center;
-    }
-    .filters label {
-      margin-right: 10px;
-      color: #555;
-    }
-    .filters input, .filters select {
-      padding: 5px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-    .filters button {
-      padding: 5px 10px;
-      background-color: #28a745;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .filters button:hover {
-      background-color: #218838;
-    }
-    .container {
-      background-color: white;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-  </style>
-  <body>
-    <h2>ESP8266 TESTE</h2>
-    <div class="filters">
-      <label for="startDate">Start Date:</label>
-      <input type="date" id="startDate" name="startDate" value="<?php echo $startDate ?? ''; ?>">
-      <label for="endDate">End Date:</label>
-      <input type="date" id="endDate" name="endDate" value="<?php echo $endDate ?? ''; ?>">
-      <label for="intervalStart">Interval Start:</label>
-      <input type="time" id="intervalStart" name="intervalStart" value="<?php echo $intervalStart ?? ''; ?>">
-      <label for="intervalEnd">Interval End:</label>
-      <input type="time" id="intervalEnd" name="intervalEnd" value="<?php echo $intervalEnd ?? ''; ?>">
-      <label for="dataFrequency">Data Frequency:</label>
-      <select id="dataFrequency" name="dataFrequency">
-        <option value="1s" <?php echo ($dataFrequency ?? '') === '1s' ? 'selected' : ''; ?>>1 Second</option>
-        <option value="30s" <?php echo ($dataFrequency ?? '') === '30s' ? 'selected' : ''; ?>>30 Seconds</option>
-        <option value="1m" <?php echo ($dataFrequency ?? '') === '1m' ? 'selected' : ''; ?>>1 Minute</option>
-        <option value="2m" <?php echo ($dataFrequency ?? '') === '2m' ? 'selected' : ''; ?>>2 Minutes</option>
-        <option value="5m" <?php echo ($dataFrequency ?? '') === '5m' ? 'selected' : ''; ?>>5 Minutes</option>
-        <option value="10m" <?php echo ($dataFrequency ?? '') === '10m' ? 'selected' : ''; ?>>10 Minutes</option>
-        <option value="30m" <?php echo ($dataFrequency ?? '') === '30m' ? 'selected' : ''; ?>>30 Minutes</option>
-        <option value="1h" <?php echo ($dataFrequency ?? '') === '1h' ? 'selected' : ''; ?>>1 Hour</option>
-      </select>
-      <button onclick="applyFilters()">Apply Filters</button>
-    </div>
-    <div id="chart-temperature" class="container"></div>
-    <div id="chart-sensor" class="container"></div>
-    <script>
-      var temperature = <?php echo $temperature; ?>;
-      var sensor_value = <?php echo $sensor_value; ?>;
-      var timestamp = <?php echo $timestamp; ?>;
+<script src="https://code.highcharts.com/highcharts.js"></script>
+<style>
+body {
+    min-width: 310px;
+    max-width: 1280px;
+    margin: 0 auto;
+    background-color: #f4f4f4;
+    font-family: Arial, sans-serif;
+    color: #333;
+}
+.container {
+    background: white;
+    margin-bottom: 20px;
+    padding: 20px;
+    border-radius: 8px;
+}
+.filters {
+    text-align: center;
+    margin-bottom: 20px;
+}
+.filters input, .filters select {
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+</style>
+</head>
 
-      function applyFilters() {
-        const startDate = document.getElementById('startDate').value;
-        const endDate = document.getElementById('endDate').value;
-        const intervalStart = document.getElementById('intervalStart').value;
-        const intervalEnd = document.getElementById('intervalEnd').value;
-        const dataFrequency = document.getElementById('dataFrequency').value;
+<body>
+<h2 style="text-align:center;">LEITURAS DOS SENSORES</h2>
 
-        window.location.href = `?startDate=${startDate}&endDate=${endDate}&intervalStart=${intervalStart}&intervalEnd=${intervalEnd}&dataFrequency=${dataFrequency}`;
-      }
+<div class="filters">
+    <label>Sensor:</label>
+    <input type="text" id="sensor" value="<?php echo $sensor ?? ''; ?>">
 
-      var chartT = new Highcharts.Chart({
-        chart: { renderTo: 'chart-temperature' },
-        title: { text: 'Temperature', style: { color: '#555', fontSize: '1.5rem' } },
-        series: [{
-          showInLegend: false,
-          data: temperature,
-          color: '#28a745'
-        }],
-        plotOptions: {
-          line: { animation: false, dataLabels: { enabled: true } }
-        },
-        xAxis: { 
-          type: 'datetime',
-          categories: timestamp,
-          labels: { style: { color: '#555' } }
-        },
-        yAxis: {
-          title: { text: 'Temperature (Celsius)', style: { color: '#555' } },
-          labels: { style: { color: '#555' } }
-        },
-        credits: { enabled: false }
-      });
+    <label>Start Date:</label>
+    <input type="date" id="startDate" value="<?php echo $startDate ?? ''; ?>">
 
-      var chartS = new Highcharts.Chart({
-        chart: { renderTo: 'chart-sensor' },
-        title: { text: 'Sensor Value', style: { color: '#555', fontSize: '1.5rem' } },
-        series: [{
-          showInLegend: false,
-          data: sensor_value,
-          color: '#007bff'
-        }],
-        plotOptions: {
-          line: { animation: false, dataLabels: { enabled: true } }
-        },
-        xAxis: {
-          type: 'datetime',
-          categories: timestamp,
-          labels: { style: { color: '#555' } }
-        },
-        yAxis: {
-          title: { text: 'Sensor Value', style: { color: '#555' } },
-          labels: { style: { color: '#555' } }
-        },
-        credits: { enabled: false }
-      });
-    </script>
-  </body>
+    <label>End Date:</label>
+    <input type="date" id="endDate" value="<?php echo $endDate ?? ''; ?>">
+
+    <label>Interval Start:</label>
+    <input type="time" id="intervalStart" value="<?php echo $intervalStart ?? ''; ?>">
+
+    <label>Interval End:</label>
+    <input type="time" id="intervalEnd" value="<?php echo $intervalEnd ?? ''; ?>">
+
+    <label>Data Frequency:</label>
+    <select id="dataFrequency">
+        <option value="">None</option>
+        <?php 
+        $opts = ['1s','30s','1m','2m','5m','10m','30m','1h'];
+        foreach ($opts as $o) {
+            $sel = ($dataFrequency === $o) ? "selected" : "";
+            echo "<option value='$o' $sel>$o</option>";
+        }
+        ?>
+    </select>
+
+    <button onclick="applyFilters()">Apply</button>
+</div>
+
+<script>
+function applyFilters() {
+    const s = new URLSearchParams({
+        sensor: document.getElementById('sensor').value,
+        startDate: document.getElementById('startDate').value,
+        endDate: document.getElementById('endDate').value,
+        intervalStart: document.getElementById('intervalStart').value,
+        intervalEnd: document.getElementById('intervalEnd').value,
+        dataFrequency: document.getElementById('dataFrequency').value
+    }).toString();
+
+    window.location.href = "?" + s;
+}
+</script>
+
+<div id="chart-temperature" class="container"></div>
+<div id="chart-sensor" class="container"></div>
+
+<script>
+var temperature = <?php echo $temperature; ?>;
+var sensor_value = <?php echo $sensor_value; ?>;
+var timestamp = <?php echo $timestamp; ?>;
+
+Highcharts.chart('chart-temperature', {
+    title: { text: 'Sensor Temperature' },
+    xAxis: { categories: timestamp },
+    yAxis: { title: { text: '°C' } },
+    series: [{ data: temperature }]
+});
+
+Highcharts.chart('chart-sensor', {
+    title: { text: 'Sensor Value (Voltagem)' },
+    xAxis: { categories: timestamp },
+    yAxis: { title: { text: 'Voltagem (V)' } },
+    series: [{ data: sensor_value }]
+});
+</script>
+
+</body>
 </html>
