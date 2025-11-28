@@ -1,6 +1,6 @@
 <?php
 $servername = "localhost";
-$dbname = "sensor_data";
+$dbname = "sensor_projects";
 $username = "root";
 $password = "";
 
